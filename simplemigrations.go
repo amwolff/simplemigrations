@@ -1,0 +1,190 @@
+package simplemigrations
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/jackc/pgconn"
+)
+
+type Dialect string
+
+const (
+	DialectPostgres Dialect = "postgres"
+)
+
+type Logger interface {
+	Debug(ctx context.Context, msg string, args ...any)
+	Info(ctx context.Context, msg string, args ...any)
+	Warn(ctx context.Context, msg string, args ...any)
+}
+
+type (
+	DB interface {
+		Dialect() Dialect
+		Open() (Tx, error)
+		ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	}
+	Tx interface {
+		MinimalTx
+		Commit() error
+		Rollback() error
+	}
+	MinimalTx interface {
+		ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+		LatestSchemaVersion(ctx context.Context) (int, error)
+		CreateSchema(ctx context.Context, version int, comment string) error
+	}
+)
+
+type Migration struct {
+	Queries        []string
+	Version        int
+	VersionComment string
+}
+
+func validateMigrations(migrations []Migration) error {
+	if !slices.IsSortedFunc(migrations, func(a, b Migration) int {
+		return a.Version - b.Version
+	}) {
+		return errors.New("migrations are not sorted")
+	}
+
+	for i := 1; i < len(migrations); i++ {
+		if migrations[i-1].Version == migrations[i].Version {
+			return fmt.Errorf("duplicate version %d at %d, %d", migrations[i].Version, i-1, i)
+		}
+	}
+
+	return nil
+}
+
+func MigrateToLatest(ctx context.Context, log Logger, tx Tx, migrations []Migration, freshDB bool) error {
+	if err := validateMigrations(migrations); err != nil {
+		return err
+	}
+	return migrateToLatest(ctx, log, tx, migrations, freshDB)
+}
+
+func MigrateToLatestWithSchema(ctx context.Context, log Logger, db DB, schema string, temporary bool, migrations []Migration) (cleanup func() error, err error) {
+	if db.Dialect() != DialectPostgres {
+		return nil, errors.New("only postgres dialect is supported")
+	}
+	if schema == "" && temporary {
+		return nil, errors.New("the temporary option requires a schema name")
+	}
+	if err = validateMigrations(migrations); err != nil {
+		return nil, err
+	}
+
+	tx, err := db.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, RollbackUnlessCommitted(ctx, log, tx))
+	}()
+
+	if schema != "" {
+		if cleanup, err = createSchema(ctx, db, tx, schema, temporary); err != nil {
+			return nil, err
+		}
+	}
+
+	if err = migrateToLatest(ctx, log, tx, migrations, false); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P01" {
+			if err = migrateToLatest(ctx, log, tx, migrations, true); err != nil { // retry
+				return nil, err
+			}
+		}
+	}
+
+	return cleanup, tx.Commit()
+}
+
+func QuoteIdentifier(s string) string {
+	return `"` + strings.Replace(s, `"`, `""`, -1) + `"`
+}
+
+func RollbackUnlessCommitted(ctx context.Context, log Logger, tx Tx) error {
+	if err := tx.Rollback(); err != nil {
+		if errors.Is(err, sql.ErrTxDone) {
+			log.Debug(ctx, "transaction already committed")
+			return nil
+		}
+		log.Warn(ctx, "transaction rollback failed", "error", err)
+		return err
+	}
+	log.Debug(ctx, "transaction rolled back")
+	return nil
+}
+
+func SetSearchPathTo(ctx context.Context, tx MinimalTx, schema string) error {
+	_, err := tx.ExecContext(ctx, "SET search_path TO "+schema)
+	return err
+}
+
+func migrateToLatest(ctx context.Context, log Logger, tx Tx, migrations []Migration, freshDB bool) error {
+	var (
+		actualVersion int
+		err           error
+	)
+
+	if !freshDB {
+		actualVersion, err = tx.LatestSchemaVersion(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	newVersion := migrations[len(migrations)-1].Version
+
+	if newVersion < actualVersion {
+		return fmt.Errorf("actual version (%d) is higher than the number of migrations (%d); "+
+			"this usually means that this build is older than expected", actualVersion, newVersion)
+	}
+
+	for _, m := range migrations {
+		if m.Version <= actualVersion {
+			continue
+		}
+
+		for i, query := range m.Queries {
+			if _, err = tx.ExecContext(ctx, query); err != nil {
+				return fmt.Errorf("migration %d failed at query %d: %w", m.Version, i, err)
+			}
+		}
+
+		if err = tx.CreateSchema(ctx, m.Version, m.VersionComment); err != nil {
+			return fmt.Errorf("migration %d failed to update schema version: %w", m.Version, err)
+		}
+	}
+
+	log.Info(ctx, "migrations completed", "previous", actualVersion, "new", newVersion)
+
+	return nil
+}
+
+func createSchema(ctx context.Context, db DB, tx Tx, schema string, temporary bool) (cleanup func() error, _ error) {
+	if _, err := tx.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
+		return nil, err
+	}
+
+	if err := SetSearchPathTo(ctx, tx, schema); err != nil {
+		return nil, err
+	}
+
+	if temporary {
+		cleanup = func() error {
+			_, err := db.ExecContext(ctx, "DROP SCHEMA "+schema+" CASCADE")
+			return err
+		}
+	}
+
+	return cleanup, nil
+}
