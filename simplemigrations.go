@@ -201,5 +201,5 @@ func createSchema(ctx context.Context, db DB, tx Tx, schema string, temporary bo
 }
 
 func quoteIdentifier(s string) string {
-	return `"` + strings.Replace(s, `"`, `""`, -1) + `"`
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/amwolff/simplemigrations/internal/fruitsdbx"
+
 	"github.com/zeebo/assert"
 )
 
@@ -116,15 +117,15 @@ type testLogger struct {
 	t *testing.T
 }
 
-func (l *testLogger) Debug(ctx context.Context, msg string, args ...any) {
+func (l *testLogger) Debug(_ context.Context, msg string, args ...any) {
 	l.t.Logf("[DEBUG]: msg: %s, args: %v", msg, args)
 }
 
-func (l *testLogger) Info(ctx context.Context, msg string, args ...any) {
+func (l *testLogger) Info(_ context.Context, msg string, args ...any) {
 	l.t.Logf("[INFO]: msg: %s, args: %v", msg, args)
 }
 
-func (l *testLogger) Warn(ctx context.Context, msg string, args ...any) {
+func (l *testLogger) Warn(_ context.Context, msg string, args ...any) {
 	l.t.Logf("[WARN]: msg: %s, args: %v", msg, args)
 }
 
@@ -199,11 +200,11 @@ func (a *customAdapter) Dialect() Dialect {
 	return "custom"
 }
 
-func (a *customAdapter) Open(ctx context.Context) (Tx, error) {
+func (a *customAdapter) Open(context.Context) (Tx, error) {
 	return &customTxAdapter{db: a}, nil
 }
 
-func (a *customAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+func (a *customAdapter) ExecContext(context.Context, string, ...any) (sql.Result, error) {
 	return nil, nil
 }
 
@@ -213,15 +214,15 @@ type customTxAdapter struct {
 	done     bool
 }
 
-func (a *customTxAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+func (a *customTxAdapter) ExecContext(context.Context, string, ...any) (sql.Result, error) {
 	return nil, nil
 }
 
-func (a *customTxAdapter) LatestSchemaVersion(ctx context.Context) (int, error) {
+func (a *customTxAdapter) LatestSchemaVersion(context.Context) (int, error) {
 	return max(a.db.versions, a.versions), nil
 }
 
-func (a *customTxAdapter) CreateSchema(ctx context.Context, version int, comment string) error {
+func (a *customTxAdapter) CreateSchema(_ context.Context, version int, _ string) error {
 	if version < a.db.versions || version < a.versions {
 		return errors.New("cannot create schema with lower version")
 	}

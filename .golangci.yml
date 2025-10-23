@@ -22,6 +22,8 @@ linters:
         - fieldalignment
     misspell:
       locale: US
+  exclusions:
+    generated: lax
 formatters:
   enable:
     - goimports
@@ -29,6 +31,8 @@ formatters:
     goimports:
       local-prefixes:
         - github.com/amwolff/simplemigrations
+  exclusions:
+    generated: lax
 run:
   timeout: 5m
   modules-download-mode: readonly
