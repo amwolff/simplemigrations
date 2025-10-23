@@ -28,7 +28,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/amwolff/go-project-template
+        - github.com/amwolff/simplemigrations
 run:
   timeout: 5m
   modules-download-mode: readonly

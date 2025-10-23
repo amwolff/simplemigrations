@@ -1,0 +1,23 @@
+model schema_version (
+	key number
+
+	field number  int
+	field comment text
+)
+
+create schema_version ( )
+
+read first (
+	select schema_version.number
+	orderby desc schema_version.number
+)
+
+model fruit (
+	key id
+
+	field id                int
+	field name              text ( length 50 )
+	field color             text ( length 20 )
+	field calories_per_100g int
+	field is_tropical       bool
+)

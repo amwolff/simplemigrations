@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Dialect string
@@ -26,7 +26,7 @@ type Logger interface {
 type (
 	DB interface {
 		Dialect() Dialect
-		Open() (Tx, error)
+		Open(context.Context) (Tx, error)
 		ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	}
 	Tx interface {
@@ -40,6 +40,12 @@ type (
 		CreateSchema(ctx context.Context, version int, comment string) error
 	}
 )
+
+type NopLogger struct{}
+
+func (NopLogger) Debug(context.Context, string, ...any) {}
+func (NopLogger) Info(context.Context, string, ...any)  {}
+func (NopLogger) Warn(context.Context, string, ...any)  {}
 
 type Migration struct {
 	Queries        []string
@@ -81,7 +87,9 @@ func MigrateToLatestWithSchema(ctx context.Context, log Logger, db DB, schema st
 		return nil, err
 	}
 
-	tx, err := db.Open()
+	var freshDB bool
+Retry:
+	tx, err := db.Open(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -95,20 +103,21 @@ func MigrateToLatestWithSchema(ctx context.Context, log Logger, db DB, schema st
 		}
 	}
 
-	if err = migrateToLatest(ctx, log, tx, migrations, false); err != nil {
+	if err = migrateToLatest(ctx, log, tx, migrations, freshDB); err != nil {
+		// TODO(amwolff): this is bad for several reasons, although I
+		// think it checks the box for now; what I believe we should do
+		// here instead is for both MigrateToLatest… handlers to accept
+		// a function that will determine whether the error is
+		// retriable.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "42P01" {
-			if err = migrateToLatest(ctx, log, tx, migrations, true); err != nil { // retry
-				return nil, err
-			}
+			freshDB = true
+			goto Retry
 		}
+		return nil, err
 	}
 
 	return cleanup, tx.Commit()
-}
-
-func QuoteIdentifier(s string) string {
-	return `"` + strings.Replace(s, `"`, `""`, -1) + `"`
 }
 
 func RollbackUnlessCommitted(ctx context.Context, log Logger, tx Tx) error {
@@ -125,7 +134,7 @@ func RollbackUnlessCommitted(ctx context.Context, log Logger, tx Tx) error {
 }
 
 func SetSearchPathTo(ctx context.Context, tx MinimalTx, schema string) error {
-	_, err := tx.ExecContext(ctx, "SET search_path TO "+schema)
+	_, err := tx.ExecContext(ctx, fmt.Sprintf("SET search_path TO %s", quoteIdentifier(schema)))
 	return err
 }
 
@@ -171,7 +180,9 @@ func migrateToLatest(ctx context.Context, log Logger, tx Tx, migrations []Migrat
 }
 
 func createSchema(ctx context.Context, db DB, tx Tx, schema string, temporary bool) (cleanup func() error, _ error) {
-	if _, err := tx.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
+	escaped := quoteIdentifier(schema)
+
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", escaped)); err != nil {
 		return nil, err
 	}
 
@@ -181,10 +192,14 @@ func createSchema(ctx context.Context, db DB, tx Tx, schema string, temporary bo
 
 	if temporary {
 		cleanup = func() error {
-			_, err := db.ExecContext(ctx, "DROP SCHEMA "+schema+" CASCADE")
+			_, err := db.ExecContext(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", escaped))
 			return err
 		}
 	}
 
 	return cleanup, nil
+}
+
+func quoteIdentifier(s string) string {
+	return `"` + strings.Replace(s, `"`, `""`, -1) + `"`
 }
