@@ -59,6 +59,24 @@ func TestMigrateToLatestWithSchema(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, versions[len(versions)-1].Version, no)
 	})
+	t.Run("postgres, ensure cleanup is never nil", func(t *testing.T) {
+		t.Parallel()
+
+		const schema = "is it?"
+
+		ctx := context.TODO()
+		log := &testLogger{t: t}
+		adapter := newPostgresAdapter(t)
+
+		cleanup, err := MigrateToLatestWithSchema(ctx, log, adapter, schema, false, versions)
+		assert.NoError(t, err)
+		assert.NotNil(t, cleanup)
+		assert.NoError(t, cleanup())
+
+		cleanup, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions)
+		assert.NoError(t, err)
+		assert.NoError(t, cleanup())
+	})
 	t.Run("custom", func(t *testing.T) {
 		t.Parallel()
 

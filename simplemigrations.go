@@ -218,6 +218,8 @@ func createSchema(ctx context.Context, db DB, tx MinimalTx, schema string, tempo
 		cleanup = func() error {
 			return db.ExecContext(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", escaped))
 		}
+	} else {
+		cleanup = func() error { return nil }
 	}
 
 	return cleanup, nil
