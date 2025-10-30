@@ -1,3 +1,5 @@
+// Package simplemigrations provides helpers for applying ordered
+// migrations against transactional backends.
 package simplemigrations
 
 import (
@@ -11,12 +13,16 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// Dialect identifies the database dialect supported by
+// simplemigrations.
 type Dialect string
 
 const (
+	// DialectPostgres identifies the PostgreSQL dialect.
 	DialectPostgres Dialect = "postgres"
 )
 
+// Logger records diagnostic messages about migration progress.
 type Logger interface {
 	Debug(ctx context.Context, msg string, args ...any)
 	Info(ctx context.Context, msg string, args ...any)
@@ -24,16 +30,20 @@ type Logger interface {
 }
 
 type (
+	// DB opens transactional connections and reports the active
+	// dialect.
 	DB interface {
 		Dialect() Dialect
 		Open(ctx context.Context) (Tx, error)
 		ExecContext(ctx context.Context, query string, args ...any) error
 	}
+	// Tx wraps MinimalTx with commit and rollback semantics.
 	Tx interface {
 		MinimalTx
 		Commit() error
 		Rollback() error
 	}
+	// MinimalTx executes migration queries and manages schema versions.
 	MinimalTx interface {
 		ExecContext(ctx context.Context, query string, args ...any) error
 		LatestSchemaVersion(ctx context.Context) (int, error)
@@ -41,12 +51,19 @@ type (
 	}
 )
 
+// NopLogger implements Logger without producing any output.
 type NopLogger struct{}
 
+// Debug discards debug messages.
 func (NopLogger) Debug(context.Context, string, ...any) {}
-func (NopLogger) Info(context.Context, string, ...any)  {}
-func (NopLogger) Warn(context.Context, string, ...any)  {}
 
+// Info discards informational messages.
+func (NopLogger) Info(context.Context, string, ...any) {}
+
+// Warn discards warning messages.
+func (NopLogger) Warn(context.Context, string, ...any) {}
+
+// Migration describes a single schema change and its metadata.
 type Migration struct {
 	Queries        []string
 	Version        int
@@ -69,6 +86,8 @@ func validateMigrations(migrations []Migration) error {
 	return nil
 }
 
+// MigrateToLatest runs pending migrations within the provided
+// transaction.
 func MigrateToLatest(ctx context.Context, log Logger, tx MinimalTx, migrations []Migration, freshDB bool) error {
 	if err := validateMigrations(migrations); err != nil {
 		return err
@@ -76,6 +95,8 @@ func MigrateToLatest(ctx context.Context, log Logger, tx MinimalTx, migrations [
 	return migrateToLatest(ctx, log, tx, migrations, freshDB)
 }
 
+// MigrateToLatestWithSchema runs pending migrations, optionally
+// creating an isolated schema.
 func MigrateToLatestWithSchema(ctx context.Context, log Logger, db DB, schema string, temporary bool, migrations []Migration) (cleanup func() error, err error) {
 	if db.Dialect() != DialectPostgres {
 		return nil, errors.New("only postgres dialect is supported")
@@ -120,6 +141,8 @@ Retry:
 	return cleanup, tx.Commit()
 }
 
+// RollbackUnlessCommitted rolls back the transaction unless it has
+// already been committed.
 func RollbackUnlessCommitted(ctx context.Context, log Logger, tx Tx) error {
 	if err := tx.Rollback(); err != nil {
 		if errors.Is(err, sql.ErrTxDone) {
@@ -133,6 +156,8 @@ func RollbackUnlessCommitted(ctx context.Context, log Logger, tx Tx) error {
 	return nil
 }
 
+// SetSearchPathTo changes the search_path to the given schema within
+// the transaction.
 func SetSearchPathTo(ctx context.Context, tx MinimalTx, schema string) error {
 	return tx.ExecContext(ctx, fmt.Sprintf("SET search_path TO %s", quoteIdentifier(schema)))
 }
