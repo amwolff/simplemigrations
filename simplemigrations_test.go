@@ -142,16 +142,18 @@ func (a *postgresAdapter) Open(ctx context.Context) (Tx, error) {
 	return &postgresTxAdapter{tx: tx}, err
 }
 
-func (a *postgresAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	return a.db.ExecContext(ctx, query, args...)
+func (a *postgresAdapter) ExecContext(ctx context.Context, query string, args ...any) error {
+	_, err := a.db.ExecContext(ctx, query, args...)
+	return err
 }
 
 type postgresTxAdapter struct {
 	tx *fruitsdbx.Tx
 }
 
-func (a *postgresTxAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	return a.tx.ExecContext(ctx, query, args...)
+func (a *postgresTxAdapter) ExecContext(ctx context.Context, query string, args ...any) error {
+	_, err := a.tx.ExecContext(ctx, query, args...)
+	return err
 }
 
 func (a *postgresTxAdapter) LatestSchemaVersion(ctx context.Context) (int, error) {
@@ -204,8 +206,8 @@ func (a *customAdapter) Open(context.Context) (Tx, error) {
 	return &customTxAdapter{db: a}, nil
 }
 
-func (a *customAdapter) ExecContext(context.Context, string, ...any) (sql.Result, error) {
-	return nil, nil
+func (a *customAdapter) ExecContext(context.Context, string, ...any) error {
+	return nil
 }
 
 type customTxAdapter struct {
@@ -214,8 +216,8 @@ type customTxAdapter struct {
 	done     bool
 }
 
-func (a *customTxAdapter) ExecContext(context.Context, string, ...any) (sql.Result, error) {
-	return nil, nil
+func (a *customTxAdapter) ExecContext(context.Context, string, ...any) error {
+	return nil
 }
 
 func (a *customTxAdapter) LatestSchemaVersion(context.Context) (int, error) {

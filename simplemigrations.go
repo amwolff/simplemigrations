@@ -26,8 +26,8 @@ type Logger interface {
 type (
 	DB interface {
 		Dialect() Dialect
-		Open(context.Context) (Tx, error)
-		ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+		Open(ctx context.Context) (Tx, error)
+		ExecContext(ctx context.Context, query string, args ...any) error
 	}
 	Tx interface {
 		MinimalTx
@@ -35,7 +35,7 @@ type (
 		Rollback() error
 	}
 	MinimalTx interface {
-		ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+		ExecContext(ctx context.Context, query string, args ...any) error
 		LatestSchemaVersion(ctx context.Context) (int, error)
 		CreateSchema(ctx context.Context, version int, comment string) error
 	}
@@ -69,7 +69,7 @@ func validateMigrations(migrations []Migration) error {
 	return nil
 }
 
-func MigrateToLatest(ctx context.Context, log Logger, tx Tx, migrations []Migration, freshDB bool) error {
+func MigrateToLatest(ctx context.Context, log Logger, tx MinimalTx, migrations []Migration, freshDB bool) error {
 	if err := validateMigrations(migrations); err != nil {
 		return err
 	}
@@ -134,11 +134,10 @@ func RollbackUnlessCommitted(ctx context.Context, log Logger, tx Tx) error {
 }
 
 func SetSearchPathTo(ctx context.Context, tx MinimalTx, schema string) error {
-	_, err := tx.ExecContext(ctx, fmt.Sprintf("SET search_path TO %s", quoteIdentifier(schema)))
-	return err
+	return tx.ExecContext(ctx, fmt.Sprintf("SET search_path TO %s", quoteIdentifier(schema)))
 }
 
-func migrateToLatest(ctx context.Context, log Logger, tx Tx, migrations []Migration, freshDB bool) error {
+func migrateToLatest(ctx context.Context, log Logger, tx MinimalTx, migrations []Migration, freshDB bool) error {
 	var (
 		actualVersion int
 		err           error
@@ -164,7 +163,7 @@ func migrateToLatest(ctx context.Context, log Logger, tx Tx, migrations []Migrat
 		}
 
 		for i, query := range m.Queries {
-			if _, err = tx.ExecContext(ctx, query); err != nil {
+			if err = tx.ExecContext(ctx, query); err != nil {
 				return fmt.Errorf("migration %d failed at query %d: %w", m.Version, i, err)
 			}
 		}
@@ -179,10 +178,10 @@ func migrateToLatest(ctx context.Context, log Logger, tx Tx, migrations []Migrat
 	return nil
 }
 
-func createSchema(ctx context.Context, db DB, tx Tx, schema string, temporary bool) (cleanup func() error, _ error) {
+func createSchema(ctx context.Context, db DB, tx MinimalTx, schema string, temporary bool) (cleanup func() error, _ error) {
 	escaped := quoteIdentifier(schema)
 
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", escaped)); err != nil {
+	if err := tx.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", escaped)); err != nil {
 		return nil, err
 	}
 
@@ -192,8 +191,7 @@ func createSchema(ctx context.Context, db DB, tx Tx, schema string, temporary bo
 
 	if temporary {
 		cleanup = func() error {
-			_, err := db.ExecContext(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", escaped))
-			return err
+			return db.ExecContext(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", escaped))
 		}
 	}
 
