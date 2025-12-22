@@ -116,6 +116,8 @@ Retry:
 		err = errors.Join(err, RollbackUnlessCommitted(ctx, log, tx))
 	}()
 
+	cleanup = func() error { return nil }
+
 	if schema != "" {
 		if cleanup, err = createSchema(ctx, db, tx, schema, temporary); err != nil {
 			return nil, err
@@ -210,8 +212,6 @@ func createSchema(ctx context.Context, db DB, tx MinimalTx, schema string, tempo
 		cleanup = func() error {
 			return db.ExecContext(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", escaped))
 		}
-	} else {
-		cleanup = func() error { return nil }
 	}
 
 	return cleanup, nil
