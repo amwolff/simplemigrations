@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Dialect identifies the database dialect supported by
@@ -97,7 +95,7 @@ func MigrateToLatest(ctx context.Context, log Logger, tx MinimalTx, migrations [
 
 // MigrateToLatestWithSchema runs pending migrations, optionally
 // creating an isolated schema.
-func MigrateToLatestWithSchema(ctx context.Context, log Logger, db DB, schema string, temporary bool, migrations []Migration) (cleanup func() error, err error) {
+func MigrateToLatestWithSchema(ctx context.Context, log Logger, db DB, schema string, temporary bool, migrations []Migration, shouldRetry func(err error) bool) (cleanup func() error, err error) {
 	if db.Dialect() != DialectPostgres {
 		return nil, errors.New("only postgres dialect is supported")
 	}
@@ -125,13 +123,7 @@ Retry:
 	}
 
 	if err = migrateToLatest(ctx, log, tx, migrations, freshDB); err != nil {
-		// TODO(amwolff): this is bad for several reasons, although I
-		// think it checks the box for now; what I believe we should do
-		// here instead is for both MigrateToLatest… handlers to accept
-		// a function that will determine whether the error is
-		// retriable.
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "42P01" {
+		if shouldRetry(err) {
 			freshDB = true
 			goto Retry
 		}
