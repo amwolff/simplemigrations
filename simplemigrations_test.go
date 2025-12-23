@@ -17,7 +17,7 @@ func TestMigrateToLatestWithSchema(t *testing.T) {
 
 	retryFunc := func() func(err error) bool {
 		var retries int
-		return func(err error) bool {
+		return func(error) bool {
 			// NOTE: you usually would check for specific errors here,
 			// like 42P01 (undefined table) in Postgres.
 			if retries > 3 {
