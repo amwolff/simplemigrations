@@ -116,12 +116,14 @@ Retry:
 		err = errors.Join(err, RollbackUnlessCommitted(ctx, log, tx))
 	}()
 
-	cleanup = func() error { return nil }
-
 	if schema != "" {
 		if cleanup, err = createSchema(ctx, db, tx, schema, temporary); err != nil {
 			return nil, err
 		}
+	}
+
+	if cleanup == nil {
+		cleanup = func() error { return nil }
 	}
 
 	if err = migrateToLatest(ctx, log, tx, migrations, freshDB); err != nil {

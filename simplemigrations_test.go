@@ -15,6 +15,19 @@ import (
 func TestMigrateToLatestWithSchema(t *testing.T) {
 	t.Parallel()
 
+	retryFunc := func() func(err error) bool {
+		var retries int
+		return func(err error) bool {
+			// NOTE: you usually would check for specific errors here,
+			// like 42P01 (undefined table) in Postgres.
+			if retries > 3 {
+				return false
+			}
+			retries++
+			return true
+		}
+	}
+
 	t.Run("postgres", func(t *testing.T) {
 		t.Parallel()
 
@@ -24,24 +37,24 @@ func TestMigrateToLatestWithSchema(t *testing.T) {
 		log := &testLogger{t: t}
 		adapter := newPostgresAdapter(t)
 
-		_, err := MigrateToLatestWithSchema(ctx, log, adapter, "", true, versions) // schema cannot be empty
+		_, err := MigrateToLatestWithSchema(ctx, log, adapter, "", true, versions, retryFunc()) // schema cannot be empty
 		assert.Error(t, err)
 
-		_, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, false, versionsInRandomOrder)
+		_, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, false, versionsInRandomOrder, retryFunc())
 		assert.Error(t, err)
-		_, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, false, versionsWithDuplicate)
+		_, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, false, versionsWithDuplicate, retryFunc())
 		assert.Error(t, err)
 
-		cleanup, err := MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions)
+		cleanup, err := MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions, retryFunc())
 		assert.NoError(t, err)
 		t.Cleanup(func() { assert.NoError(t, cleanup()) })
-		cleanup, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions)
+		cleanup, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions, retryFunc())
 		assert.NoError(t, err)
 		t.Cleanup(func() {
 			assert.NoError(t, cleanup())
 			assert.NoError(t, cleanup()) // ensure idempotency
 		})
-		cleanup, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions) // ensure idempotency
+		cleanup, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions, retryFunc()) // ensure idempotency
 		assert.NoError(t, err)
 		t.Cleanup(func() {
 			assert.NoError(t, cleanup())
@@ -68,12 +81,12 @@ func TestMigrateToLatestWithSchema(t *testing.T) {
 		log := &testLogger{t: t}
 		adapter := newPostgresAdapter(t)
 
-		cleanup, err := MigrateToLatestWithSchema(ctx, log, adapter, schema, false, versions)
+		cleanup, err := MigrateToLatestWithSchema(ctx, log, adapter, schema, false, versions, retryFunc())
 		assert.NoError(t, err)
 		assert.NotNil(t, cleanup)
 		assert.NoError(t, cleanup())
 
-		cleanup, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions)
+		cleanup, err = MigrateToLatestWithSchema(ctx, log, adapter, schema, true, versions, retryFunc())
 		assert.NoError(t, err)
 		assert.NoError(t, cleanup())
 	})
@@ -84,7 +97,7 @@ func TestMigrateToLatestWithSchema(t *testing.T) {
 		log := &testLogger{t: t}
 		adapter := &customAdapter{}
 
-		_, err := MigrateToLatestWithSchema(ctx, log, adapter, "schema", true, versions)
+		_, err := MigrateToLatestWithSchema(ctx, log, adapter, "schema", true, versions, retryFunc())
 		assert.Error(t, err)
 	})
 }
